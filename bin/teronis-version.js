@@ -100,6 +100,7 @@ last = addVersionArgument(last);
 last = addProviderOption(last);
 last = last
     .option(forceOnlineSynopsis, "If specified it will also delete the remote version")
+    .option("--package-name", "Skips the package.json validation")
     .action((args, options, logger) => {
         const applyOnGit = !!options.provider.includes(gitProvider);
         const applyOnNpm = !!options.provider.includes(npmProvider);
@@ -114,7 +115,7 @@ last = last
                 const tagCommit = shell.exec("git rev-list -n 1 " + gitTag, { silent: true }).stdout;
                 const shortCommit = tagCommit.substring(0, 7);
 
-                shell.exec("git tag -d \"" + gitTag + "\"", { silent: true });
+                shell.exec("git tag -d \"" + gitTag + "\"");
                 console.info("git(local): The tag " + gitTag + " (" + shortCommit + ") has been deleted");
             } else {
                 console.error("git(local): The local tag " + gitTag + " does not exist");
@@ -122,7 +123,7 @@ last = last
 
             if (forceOnline) {
                 if (doesRemoteGitTagExist(gitTag)) {
-                    shell.exec("git push origin :\"" + gitTag + "\"", { silent: true });
+                    shell.exec("git push origin :\"" + gitTag + "\"");
                     console.info("git(remote): The tag " + gitTag + " has been deleted");
                 } else {
                     console.info("git(remote): The tag " + gitTag + " does not exist");
