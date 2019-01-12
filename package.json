@@ -2,7 +2,7 @@
   "name": "teronis-nodejs-version-cli",
   "version": "0.0.1",
   "description": "Manage version publishments.",
-  "main": "teronis-version.js",
+  "main": "bin/teronis-version.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -25,6 +25,7 @@
     "caporal": "^1.1.0",
     "git-repo-info": "^2.1.0",
     "moment": "^2.23.0",
+    "parent-package-json": "^2.0.1",
     "semver": "^5.6.0",
     "shelljs": "^0.8.3"
   }
