@@ -9,19 +9,28 @@
             "request": "launch",
             "name": "Launch Program",
             "program": "${workspaceFolder}\\bin\\teronis-version.js",
-            // "args": [
+            // "args": [    
             //     "exist",
             //     "0.0.4",
             //     "npm"
+            // ]
+            // "args": [
+            //     "delete",
+            //     "0.0.4",
+            //     "-p",
+            //     "git",
+            //     "-p",
+            //     "npm",
+            //     "--force-online"
             // ]
             "args": [
                 "delete",
                 "0.0.4",
                 "-p",
-                "git",
-                "-p",
                 "npm",
-                "--force-online"
+                "--force-online",
+                "--npm-package-name",
+                "@teronis/version-cli"
             ]
         }
     ]

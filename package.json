@@ -1,6 +1,6 @@
 {
   "name": "@teronis/version-cli",
-  "version": "0.0.2",
+  "version": "0.0.5",
   "description": "Manage version publishments.",
   "main": "bin/teronis-version.js",
   "scripts": {

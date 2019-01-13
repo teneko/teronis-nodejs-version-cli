@@ -12,9 +12,11 @@ const providerUnion = supportedProviders.join("|");
 const providerOptionDescription = "The provider (" + providerUnion + ") on which the action will apply";
 const versionOptionDescription = "A semver-compatible version";
 const forceOnlineSynopsisFullName = "--force-online";
+const npmPackageNameSynopsisFullName = "--npm-package-name <npm-package-name>";
 
 const preGitLocalMessage = "git(local): ";
 const preGitRemoteMessage = "git(remote): ";
+const preNpmLocalMessage = "npm(local): ";
 const preNpmRemoteMessage = "npm(remote): ";
 
 /**
@@ -46,7 +48,7 @@ function getGitRequirements() {
     }
 
     return {
-        message,
+        message: preGitLocalMessage + message,
         code
     };
 }
@@ -154,24 +156,15 @@ function deleteRemoteGitTag({ gitTag, gitRequirements, checkTagExistence = true,
     }
 }
 
-function getNpmPackageNameVersion({ packageName, npmVersion }) {
-    return packageName + "@" + npmVersion;
-}
-
 function getNpmRequirements() {
     let message;
     let code;
     let packagePackageJsonFilePath;
 
-    const hasParentPackageJsonFilePath = () => {
-        // /sister compensates /.. in "parent-package-json"-module
-        return !!(packagePackageJsonFilePath = parentPackageJsonFile(process.cwd() + "/sister").path);
-    }
-
     if (!shell.which("npm")) {
         message = "Sorry, this script requires npm";
         code = 1;
-    } else if (!hasParentPackageJsonFilePath()) {
+    } else if (!(packagePackageJsonFilePath = parentPackageJsonFile(process.cwd() + "/sister").path)) {
         message = "Sorry, the file package.json does not exist in the current or in any top directory";
         code = 1;
     } else {
@@ -180,44 +173,85 @@ function getNpmRequirements() {
     }
 
     return {
-        message: preNpmRemoteMessage + message,
+        message: preNpmLocalMessage + message,
         code,
         packagePackageJsonFilePath
     };
 }
 
-function getNpmPackageInfos({ npmVersion, npmRequirements }) {
-    const packageJsonFile = require(npmRequirements.packagePackageJsonFilePath);
-    const packageName = packageJsonFile.name;
-    const packageNameVersion = getNpmPackageNameVersion({ packageName, npmVersion });
+function getNpmPackageName({ npmPackageName, npmRequirements }) {
+    let message = "The package name has been determined."
+    let foreignMessage;
+    let code = 0;
+
+    if (typeof npmPackageName === "undefined") {
+        if (!npmRequirements && (npmRequirements = getNpmRequirements()).code !== 0) {
+            foreignMessage = npmRequirements.message;
+            code = npmRequirements.code;
+        } else {
+            const packageJsonFile = require(npmRequirements.packagePackageJsonFilePath);
+            npmPackageName = packageJsonFile.name;
+        }
+    }
 
     return {
-        packageJsonFile,
-        packageName,
-        packageNameVersion
+        message: foreignMessage || preNpmLocalMessage + message,
+        code,
+        npmPackageName
     };
 }
 
-function doesNpmPackageVersionExist({ npmVersion, npmRequirements, npmPackageInfos }) {
+function getNpmPackageNameVersion({ npmPackageName, npmPackageNameObj, npmVersion, npmRequirements }) {
+    let code;
+    let message;
+    let foreignMessage;
+    let npmPackageNameVersion;
+
+    if (!npmPackageNameObj && (npmPackageNameObj = getNpmPackageName({ npmPackageName, npmRequirements })).code !== 0) {
+        foreignMessage = npmPackageNameObj.message;
+        code = npmPackageNameObj.code;
+    } else {
+        npmPackageNameVersion = npmPackageNameObj.npmPackageName + "@" + npmVersion;
+        message = "The package name and version has been crafted";
+        code = 0;
+    }
+
+    return {
+        npmPackageNameObj,
+        npmPackageNameVersion,
+        message: foreignMessage || preNpmLocalMessage + message,
+        code
+    };
+}
+
+function doesNpmPackageVersionExist({
+    npmPackageName,
+    npmPackageNameObj,
+    npmPackageNameVersionObj,
+    npmVersion,
+    npmRequirements
+}) {
     let code;
     let message;
     let foreignMessage;
 
-    if (!npmRequirements && (npmRequirements = getNpmRequirements()).code !== 0) {
-        message = gitRequirements.message;
-        code = gitRequirements.code;
+    if (!npmPackageNameObj && (npmPackageNameObj = getNpmPackageName({ npmPackageName, npmRequirements })).code !== 0) {
+        foreignMessage = npmPackageNameObj.message;
+        code = npmPackageNameObj.code;
+    } else if (!npmPackageNameVersionObj && (npmPackageNameVersionObj = getNpmPackageNameVersion({ npmPackageName, npmPackageNameObj, npmVersion, npmRequirements })).code !== 0) {
+        foreignMessage = npmPackageNameVersionObj.message;
+        code = npmPackageNameVersionObj.code;
     } else {
-        npmPackageInfos = npmPackageInfos || getNpmPackageInfos({ npmVersion, npmRequirements });
-        const result = shell.exec("npm view " + npmPackageInfos.packageNameVersion, { silent: true });
+        const result = shell.exec("npm view " + npmPackageNameVersionObj.npmPackageNameVersion, { silent: true });
 
         if (result.code !== 0) {
-            message = "The package " + npmPackageInfos.packageName + " does not exist";
+            message = "The package " + npmPackageNameObj.npmPackageName + " does not exist";
             code = 2;
         } else if (result.stdout === "") {
-            message = "The version " + npmVersion + " does not exists";
+            message = "The version " + npmVersion + " does not exist";
             code = 1;
         } else {
-            message = npmPackageInfos.packageNameVersion + " does exist";
+            message = npmPackageNameVersionObj.npmPackageNameVersion + " does exist";
             code = 0;
         }
     }
@@ -228,27 +262,37 @@ function doesNpmPackageVersionExist({ npmVersion, npmRequirements, npmPackageInf
     }
 }
 
-function deleteRemoteNpmPackageVersion({ npmVersion, npmRequirements, checkVersionExistence = true, forceOnline }) {
+function deleteRemoteNpmPackageVersion({
+    npmVersion,
+    npmPackageName,
+    npmPackageNameObj,
+    npmPackageNameVersionObj,
+    npmRequirements,
+    checkVersionExistence = true,
+    forceOnline
+}) {
     let code;
     let message;
     let foreignMessage;
 
-    if (!npmRequirements && (npmRequirements = getNpmRequirements()).code !== 0) {
-        message = gitRequirements.message;
-        code = gitRequirements.code;
+    if (!npmPackageNameObj && (npmPackageNameObj = getNpmPackageName({ npmPackageName, npmRequirements })).code !== 0) {
+        foreignMessage = npmPackageNameObj.message;
+        code = npmPackageNameObj.code;
+    } else if (!npmPackageNameVersionObj && (npmPackageNameVersionObj = getNpmPackageNameVersion({ npmPackageName, npmPackageNameObj, npmVersion, npmRequirements })).code !== 0) {
+        foreignMessage = npmPackageNameVersionObj.message;
+        code = npmPackageNameVersionObj.code;
     } else {
-        const packageInfos = getNpmPackageInfos({ npmVersion, npmRequirements });
-        const packageVersionExistence = doesNpmPackageVersionExist({ npmVersion, npmRequirements, packageInfos });
+        const packageVersionExistence = doesNpmPackageVersionExist({ npmVersion, npmPackageNameObj, npmPackageNameVersionObj, npmRequirements });
 
         if (checkVersionExistence && packageVersionExistence.code !== 0) {
             foreignMessage = packageVersionExistence.message;
             code = packageVersionExistence.code;
         } else if (!forceOnline) {
-            message = "To delete the version " + npmVersion + " you need to specify " + forceOnlineSynopsisFullName;
+            message = "You need to specify " + forceOnlineSynopsisFullName + " to unpublish " + npmPackageNameVersionObj.npmPackageNameVersion + ". This action is irreversible";
             code = 1;
         } else {
-            shell.exec("npm unpublish --force " + packageInfos.packageNameVersion);
-            message = "The package " + packageInfos.packageNameVersion + " has been unpublished";
+            shell.exec("npm unpublish --force " + npmPackageNameVersionObj.npmPackageNameVersion);
+            message = "The package " + npmPackageNameVersionObj.npmPackageNameVersion + " has been unpublished";
             code = 0;
         }
     }
@@ -260,12 +304,13 @@ function deleteRemoteNpmPackageVersion({ npmVersion, npmRequirements, checkVersi
 }
 
 const deleteVersion = ({
-    version,
+    version: npmVersion,
     useGitProvider,
     useNpmProvider,
-    forceOnline
+    forceOnline,
+    npmPackageName
 }) => {
-    version = getCleanVersion(version);
+    npmVersion = getCleanVersion(npmVersion);
     let code;
     let messages = [];
     let gitRequirements;
@@ -274,12 +319,12 @@ const deleteVersion = ({
     if (useGitProvider && (gitRequirements = getGitRequirements()).code !== 0) {
         messages.push(gitRequirements.message);
         code = gitRequirements.code;
-    } else if (useNpmProvider && (npmRequirements = getNpmRequirements()).code !== 0) {
+    } else if (useNpmProvider && !npmPackageName && (npmRequirements = getNpmRequirements()).code !== 0) {
         messages.push(npmRequirements.message);
         code = npmRequirements.code;
     } else {
         if (useGitProvider) {
-            const gitTag = getGitTag(version);
+            const gitTag = getGitTag(npmVersion);
 
             const localGitTagDeletion = deleteLocalGitTag({
                 gitTag,
@@ -298,7 +343,8 @@ const deleteVersion = ({
 
         if (useNpmProvider) {
             const remoteNpmPackageVersionDeletion = deleteRemoteNpmPackageVersion({
-                npmVersion: version,
+                npmPackageName,
+                npmVersion,
                 npmRequirements,
                 forceOnline,
             });
@@ -342,7 +388,7 @@ const addProviderOption = (last) => {
 }
 
 const addVersionArgument = (last) => {
-    return last.argument("<version>", versionOptionDescription, program.STRING, undefined, true); //-v, --version 
+    return last.argument("<version>", versionOptionDescription, program.STRING, undefined); //-v, --version 
 }
 
 let last = program
@@ -351,38 +397,41 @@ last = addVersionArgument(last);
 last = addProviderOption(last);
 last = last
     .option(forceOnlineSynopsisFullName, "If specified it will also delete the remote version")
-    .option("--package-name", "Skips the package.json validation")
+    .option(npmPackageNameSynopsisFullName, "Skips the need of the local package.json")
+    .option("--git-discard-commit", "The version commit will be discarded. The changes are kept by its parent commit, except the commit message.")
     .action((args, options, logger) => {
         const useGitProvider = !!options.provider.includes(gitProvider);
         const useNpmProvider = !!options.provider.includes(npmProvider);
         const version = args.version;
         const forceOnline = options.forceOnline;
+        const npmPackageName = options.npmPackageName || undefined;
 
         const versionDeletion = deleteVersion({
             useGitProvider,
             useNpmProvider,
             version,
-            forceOnline
+            forceOnline,
+            npmPackageName
         });
 
         for (const message of versionDeletion.messages) {
-            if (message) {
+            if (!!message) {
                 console.info(message);
             }
         }
     });
 
-last = last
-    .command("exist")
-    .argument("<version>", versionOptionDescription, program.STRING)
+last = last.command("exist");
+last = addVersionArgument(last)
     .argument("<provider>", providerOptionDescription, supportedProviders)
+    .option(npmPackageNameSynopsisFullName, "Skips the need of the local package.json", program.STRING, undefined)
     .action((args, options, logger) => {
         const useGitProvider = args.provider === gitProvider;
         const useNpmProvider = args.provider === npmProvider;
-        const version = getCleanVersion(args.version);
+        const npmVersion = getCleanVersion(args.version);
 
         if (useGitProvider) {
-            const gitTag = getGitTag(version);
+            const gitTag = getGitTag(npmVersion);
             const gitRequirements = getGitRequirements();
 
             if (gitRequirements.code !== 0) {
@@ -404,10 +453,8 @@ last = last
                 process.exit(localGitTagExistence.code || remoteGitTagExistence.code);
             }
         } else if (useNpmProvider) {
-            const remoteNpmTagExistence = doesNpmPackageVersionExist({
-                npmVersion:
-                    version
-            });
+            const npmPackageName = options.npmPackageName || undefined;
+            const remoteNpmTagExistence = doesNpmPackageVersionExist({ npmPackageName, npmVersion });
 
             console.log(remoteNpmTagExistence.message);
             process.exit(remoteNpmTagExistence.code);
