@@ -12,15 +12,24 @@ const supportedProviders = [gitProvider, npmProvider];
 const providerUnion = supportedProviders.join("|");
 const providerOptionDescription = "The provider (" + providerUnion + ") on which the action will apply";
 const versionOptionDescription = "A semver-compatible version";
-const forceOnlineSynopsis = "--force-online";
+const forceOnlineSynopsisFullName = "--force-online";
 
-function parseStringAsArray(option, includes) {
+/**
+ * If this function used as callback, then caporal will pass a string separated by comma as option. 
+ * Can throw an exception if option is no string or array.
+ * @param {string|string[]} option 
+ * @param {string[]} includes 
+ * @returns {string[]}
+ */
+function parseCaporalOptionAsArray(option, includes) {
     let options;
 
     if (typeof option === "string")
         options = option.split(",");
-    else
+    else if (typeof option === "array")
         options = option;
+    else
+        throw new Error("Unknown input type");
 
     for (option of options)
         if (!includes.includes(option))
@@ -29,69 +38,254 @@ function parseStringAsArray(option, includes) {
     return options;
 }
 
-function getRequirements(applyOnGit, applyOnNpm) {
-    let reqData = {};
-
-    if (applyOnGit && !shell.which("git")) {
-        console.log("Sorry, this script requires git");
-        process.exit(1);
-    } else if (applyOnGit && shell.exec("git rev-parse --is-inside-work-tree", { silent: true }).code !== 0) {
-        console.log("Sorry, but you are not in a git repository");
-        process.exit(1);
-    }
-
-    if (applyOnNpm) {
-        if (!shell.which("npm")) {
-            console.log("Sorry, this script requires npm");
-            process.exit(1);
-        }
-
-        const packageJsonFilePath = parentPackageJsonFile(process.cwd()).path;
-
-        if (!packageJsonFilePath) {
-            console.log("Sorry, the file package.json does not exist in the current or in any top directory");
-            process.exit(1);
-        }
-
-        reqData.packageJsonFilePath = packageJsonFilePath;
-    }
-
-    return reqData;
-}
-
-function getVersion(version) {
+/**
+ * Just clean the version.
+ * @param {string} version 
+ * @returns {string}
+ */
+function getCleanVersion(version) {
     return semver.clean(version);
 };
 
+function getGitRequirements() {
+    let code;
+    let message;
+
+    if (!shell.which("git")) {
+        message = "Sorry, this script requires git";
+        code = 1;
+    } else if (shell.exec("git rev-parse --is-inside-work-tree", { silent: true }).code !== 0) {
+        message = "Sorry, but you are not in a git repository";
+        code = 1;
+    }
+
+    return {
+        message,
+        code
+    };
+}
+
+function doesLocalGitTagExist(gitTag) {
+    const code = !!shell.exec("git tag -l \"" + gitTag + "\"", { silent: true }).stdout;
+    let message;
+
+    if (code !== 0)
+        message = "The tag " + gitTag + " does not exist";
+    else
+        message = "The tag " + gitTag + " does exist";
+
+    return {
+        message,
+        code
+    };
+}
+
+function deleteLocalGitTag({ gitTag, checkRequirements, checkTagExistence } = { checkRequirements: true, checkTagExistence: true }) {
+    let code;
+    let message;
+    let gitRequirements;
+    let localGitTagExistence;
+
+    if (checkRequirements && (gitRequirements = getGitRequirements()).code !== 0) {
+        message = gitRequirements.message;
+        code = gitRequirements.code;
+    } else if (checkTagExistence && (localGitTagExistence = doesLocalGitTagExist(gitTag)).code !== 0) {
+        message = localGitTagExistence;
+        code = localGitTagExistence.code;
+    } else {
+        shell.exec("git tag -d \"" + gitTag + "\"");
+        message = "The tag " + gitTag + " has been deleted";
+        code = 0;
+    }
+
+    return {
+        message,
+        code
+    }
+}
+
+function doesRemoteGitTagExist(gitTag) {
+    const code = !!shell.exec("git ls-remote --tags origin refs/tags/\"" + gitTag + "\"", { silent: true }).stdout;
+    let message;
+
+    if (code !== 0)
+        message = "The tag " + gitTag + " does not exist";
+    else
+        message = "The tag " + gitTag + " does exist";
+
+    return {
+        message,
+        code
+    };
+}
+
+function deleteRemoteGitTag({ gitTag, checkRequirements, checkTagExistence, forceOnline } = { checkRequirements: true, checkTagExistence: true }) {
+    let code;
+    let message;
+    let gitRequirements;
+    let remoteGitTagExistence;
+
+    if (checkRequirements && (gitRequirements = getGitRequirements()).code !== 0) {
+        message = gitRequirements.message;
+        code = gitRequirements.code;
+    } else if (checkTagExistence && (remoteGitTagExistence = doesRemoteGitTagExist(gitTag)).code !== 0) {
+        message = remoteGitTagExistence.message;
+        code = remoteGitTagExistence.code;
+    } else if (!forceOnline) {
+        message = "To delete the tag " + gitTag + " you need to specify " + forceOnlineSynopsisFullName;
+        code = 1;
+    } else {
+        shell.exec("git push origin :\"" + gitTag + "\"");
+        message = "The tag " + gitTag + " has been deleted";
+        code = 0;
+    }
+
+    return {
+        message,
+        code
+    }
+}
+
+function getNpmRequirements() {
+    let message;
+    let code;
+    let packagePackageJsonFilePath;
+
+    const hasParentPackageJsonFilePath = () => {
+        return !!(packagePackageJsonFilePath = parentPackageJsonFile(process.cwd() + "/sister").path);
+    }
+
+    if (!shell.which("npm")) {
+        message = "Sorry, this script requires npm";
+        code = 1;
+    } else if (!hasParentPackageJsonFilePath()) {
+        message = "Sorry, the file package.json does not exist in the current or in any top directory";
+        code = 1;
+    }
+
+    return {
+        message,
+        code,
+        packagePackageJsonFilePath
+    };
+}
+
+function doesNpmPackageVersionExist(packageNameVersion) {
+    let code;
+    let message;
+    const result = shell.exec("npm view " + packageNameVersion, { silent: true });
+
+    if (result.code !== 0) {
+        message = "The package does not exist";
+        code = 2;
+    } else if (result.stdout === "") {
+        message = "The version does not exists";
+        code = 1;
+    } else {
+        message = packageNameVersion + " does exist";
+        code = 0;
+    }
+
+    return {
+        message,
+        code
+    }
+}
+
+function deleteRemoteNpmPackageVersion({ npmVersion, checkRequirements, checkVersionExistence, forceOnline } = { checkRequirements: true, checkVersionExistence: true }) {
+    let code;
+    let message;
+    let npmRequirements;
+
+    if (checkRequirements && (npmRequirements = getNpmRequirements()).code !== 0) {
+        message = gitRequirements.message;
+        code = gitRequirements.code;
+    } else {
+        const packageJsonFile = require(npmRequirements.packagePackageJsonFilePath);
+        const npmPackageName = packageJsonFile.name;
+        const packageNameVersion = npmPackageName + "@" + npmVersion;
+        const packageVersionExistence = doesNpmPackageVersionExist(packageNameVersion);
+
+        if (checkVersionExistence && packageVersionExistence.code !== 0) {
+            message = packageVersionExistence.message;
+            code = packageVersionExistence.code;
+        } else if (!forceOnline) {
+            message = "To delete the version " + gitTag + " you need to specify " + forceOnlineSynopsisFullName;
+            code = 1;
+        } else {
+            shell.exec("npm unpublish --force " + packageNameVersion);
+            message = "The package " + packageNameVersion + " has been unpublished";
+            code = 0;
+        }
+    }
+
+    return {
+        message,
+        code
+    }
+}
+
+const deleteVersion = ({
+    version,
+    useGitProvider,
+    useNpmProvider,
+    forceOnline
+}) => {
+    version = getCleanVersion(version);
+    let code;
+    let messages = [];
+    let gitRequirements;
+
+    if (useGitProvider && (gitRequirements = getGitRequirements()).code !== 0) {
+        messages.push(gitRequirements.message);
+        code = gitRequirements.code;
+    } else if (useGitProvider && (gitRequirements = getGitRequirements()).code !== 0) {
+        messages.push(gitRequirements.message);
+        code = gitRequirements.code;
+    } else {
+        if (useGitProvider) {
+            const gitTag = "v" + version;
+
+            const localGitTagDeletion = deleteLocalGitTag({
+                gitTag,
+                checkRequirements: false
+            });
+
+            const remoteGitTagDeletion = deleteRemoteGitTag({
+                gitTag,
+                checkRequirements: false,
+                forceOnline
+            });
+
+            messages.push(localGitTagDeletion.message);
+            messages.push(remoteGitTagDeletion.message);
+        }
+
+        if (useNpmProvider) {
+            const remoteNpmPackageVersionDeletion = deleteRemoteNpmPackageVersion({
+                npmVersion: version,
+                checkRequirements: false,
+                forceOnline,
+            });
+
+            messages.push(remoteNpmPackageVersionDeletion.message);
+        }
+
+        code = 0;
+    }
+
+    return {
+        messages,
+        code
+    }
+}
+
 const addProviderOption = (last) => {
-    return last.option("-p, --provider <" + providerUnion + ">", providerOptionDescription, (provider) => parseStringAsArray(provider, supportedProviders), undefined, true)
+    return last.option("-p, --provider <" + providerUnion + ">", providerOptionDescription, (provider) => parseCaporalOptionAsArray(provider, supportedProviders), undefined, true)
 }
 
 const addVersionArgument = (last) => {
     return last.argument("<version>", versionOptionDescription, program.STRING, undefined, true); //-v, --version 
-}
-
-function doesGitTagExist(gitTag) {
-    return !!shell.exec("git tag -l \"" + gitTag + "\"", { silent: true }).stdout;
-}
-
-function doesRemoteGitTagExist(gitTag) {
-    return !!shell.exec("git ls-remote --tags origin refs/tags/\"" + gitTag + "\"", { silent: true }).stdout;
-}
-
-function getNpmPackageNameVersionStatusCode(packageNameVersion) {
-    const result = shell.exec("npm view " + packageNameVersion, { silent: true });
-
-    if (result.code !== 0) {
-        // package does not exist
-        return 2;
-    } else if (result.stdout === "") {
-        // version does not exist
-        return 1;
-    } else {
-        // version does exist
-        return 0;
-    }
 }
 
 let last = program
@@ -99,58 +293,20 @@ let last = program
 last = addVersionArgument(last);
 last = addProviderOption(last);
 last = last
-    .option(forceOnlineSynopsis, "If specified it will also delete the remote version")
+    .option(forceOnlineSynopsisFullName, "If specified it will also delete the remote version")
     .option("--package-name", "Skips the package.json validation")
     .action((args, options, logger) => {
-        const applyOnGit = !!options.provider.includes(gitProvider);
-        const applyOnNpm = !!options.provider.includes(npmProvider);
-        const reqData = getRequirements(applyOnGit, applyOnNpm);
-        const version = getVersion(args.version);
+        const useGitProvider = !!options.provider.includes(gitProvider);
+        const useNpmProvider = !!options.provider.includes(npmProvider);
+        const version = args.version;
         const forceOnline = options.forceOnline;
 
-        if (applyOnGit) {
-            const gitTag = "v" + version;
-
-            if (doesGitTagExist(gitTag)) {
-                const tagCommit = shell.exec("git rev-list -n 1 " + gitTag, { silent: true }).stdout;
-                const shortCommit = tagCommit.substring(0, 7);
-
-                shell.exec("git tag -d \"" + gitTag + "\"");
-                console.info("git(local): The tag " + gitTag + " (" + shortCommit + ") has been deleted");
-            } else {
-                console.error("git(local): The local tag " + gitTag + " does not exist");
-            }
-
-            if (forceOnline) {
-                if (doesRemoteGitTagExist(gitTag)) {
-                    shell.exec("git push origin :\"" + gitTag + "\"");
-                    console.info("git(remote): The tag " + gitTag + " has been deleted");
-                } else {
-                    console.info("git(remote): The tag " + gitTag + " does not exist");
-                }
-            } else {
-                console.warn("npm(remote): To delete the remote tag " + gitTag + " you need to specify " + forceOnlineSynopsis);
-            }
-        }
-
-        if (applyOnNpm) {
-            const packageJsonFile = require(reqData.packageJsonFilePath);
-            const npmPackageName = packageJsonFile.name;
-            const packageNameVersion = npmPackageName + "@" + version;
-
-            if (forceOnline) {
-                const result = getNpmPackageNameVersionStatusCode(packageNameVersion);
-
-                if (result === 0) {
-                    shell.exec("npm unpublish --force " + packageNameVersion);
-                    console.info("npm(remote): The package@version " + packageNameVersion + " has been unpublished");
-                } else {
-                    console.info("npm(remote): The package or version does not exist");
-                }
-            } else {
-                console.warn("npm(remote): To unpublish " + packageNameVersion + " you need to specify " + forceOnlineSynopsis);
-            }
-        }
+        deleteVersion({
+            useGitProvider,
+            useNpmProvider,
+            version,
+            forceOnline
+        });
     });
 last = last
     .command("exist")
@@ -160,13 +316,13 @@ last = last
         const applyOnGit = args.provider === gitProvider;
         const applyOnNpm = args.provider === npmProvider;
         const reqData = getRequirements(applyOnGit, applyOnNpm);
-        const version = getVersion(args.version);
+        const version = getCleanVersion(args.version);
 
         if (applyOnNpm) {
             const packageJsonFile = require(reqData.packageJsonFilePath);
             const npmPackageName = packageJsonFile.name;
             const npmPackageNameVersion = npmPackageName + "@" + version
-            const result = getNpmPackageNameVersionStatusCode(npmPackageNameVersion);
+            const result = doesNpmPackageVersionExist(npmPackageNameVersion);
 
             if (result === 0) {
                 console.info("npm: " + npmPackageNameVersion + " does exist");
@@ -181,7 +337,7 @@ last = last
         } else if (applyOnGit) {
             const gitTag = "v" + version;
 
-            if (doesGitTagExist(gitTag)) {
+            if (doesLocalGitTagExist(gitTag)) {
                 console.info("git: The tag \"" + gitTag + "\" does exist");
                 process.exit(0);
             } else {
