@@ -1,8 +1,11 @@
 {
   "name": "@teronis/version-cli",
-  "version": "0.0.9",
+  "version": "0.1.1",
   "description": "Manage version publishments.",
-  "main": "bin/teronis-version.js",
+  "bin": {
+    "teronis-version": "./bin/teronis-version.js"
+  },
+  "preferGlobal": true,
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
